@@ -2,7 +2,7 @@ import threading
 import time
 import sqlite3
 import os
-from tkinter import Tk, Button, Label, filedialog, StringVar, simpledialog, messagebox, Scale, IntVar
+from tkinter import Tk, Button, Label, filedialog, StringVar, simpledialog, messagebox, Scale, IntVar, Frame
 
 import numpy as np
 
@@ -91,15 +91,54 @@ class TrackerApp:
         self.status_var = StringVar()
         self.status_var.set("Idle")
 
-        self.btn_webcam = Button(self.root, text="Track from Webcam", command=self.start_webcam)
-        self.btn_video = Button(self.root, text="Track from Video", command=self.start_video)
-        self.btn_image = Button(self.root, text="Track in Image", command=self.start_image)
-        self.btn_stop = Button(self.root, text="Stop", command=self.stop_tracking)
-        self.lbl_status = Label(self.root, textvariable=self.status_var)
+        # GUI size variables
+        self.gui_scale_var = IntVar(value=100)
+        self.opencv_scale_var = IntVar(value=100)
+        self.image_scale_var = IntVar(value=100)
+
+        # Create main frame
+        main_frame = Frame(self.root)
+        main_frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # Size control frame
+        size_frame = Frame(main_frame)
+        size_frame.pack(fill="x", pady=(0, 8))
+        
+        Label(size_frame, text="GUI Size Controls:", font=("Arial", 10, "bold")).pack(anchor="w")
+        
+        # GUI scale control
+        gui_scale_frame = Frame(size_frame)
+        gui_scale_frame.pack(fill="x", pady=2)
+        Label(gui_scale_frame, text="Main GUI Scale:").pack(side="left")
+        Scale(gui_scale_frame, from_=50, to=200, orient="horizontal", 
+              variable=self.gui_scale_var, length=150, command=self.update_gui_size).pack(side="left", padx=(5, 0))
+        Label(gui_scale_frame, text="%").pack(side="left")
+        
+        # OpenCV window scale control
+        opencv_scale_frame = Frame(size_frame)
+        opencv_scale_frame.pack(fill="x", pady=2)
+        Label(opencv_scale_frame, text="Tracking Window Scale:").pack(side="left")
+        Scale(opencv_scale_frame, from_=25, to=200, orient="horizontal", 
+              variable=self.opencv_scale_var, length=150).pack(side="left", padx=(5, 0))
+        Label(opencv_scale_frame, text="%").pack(side="left")
+        
+        # Image detection scale control
+        image_scale_frame = Frame(size_frame)
+        image_scale_frame.pack(fill="x", pady=2)
+        Label(image_scale_frame, text="Image Detection Scale:").pack(side="left")
+        Scale(image_scale_frame, from_=25, to=200, orient="horizontal", 
+              variable=self.image_scale_var, length=150).pack(side="left", padx=(5, 0))
+        Label(image_scale_frame, text="%").pack(side="left")
+
+        self.btn_webcam = Button(main_frame, text="Track from Webcam", command=self.start_webcam)
+        self.btn_video = Button(main_frame, text="Track from Video", command=self.start_video)
+        self.btn_image = Button(main_frame, text="Track in Image", command=self.start_image)
+        self.btn_stop = Button(main_frame, text="Stop", command=self.stop_tracking)
+        self.lbl_status = Label(main_frame, textvariable=self.status_var)
 
         # Instructions and threshold slider
         self.instructions = Label(
-            self.root,
+            main_frame,
             text=(
                 "How to use:\n"
                 "1) Click Webcam/Video/Image.\n"
@@ -112,7 +151,7 @@ class TrackerApp:
         )
         self.threshold_var = IntVar(value=40)
         self.slider = Scale(
-            self.root,
+            main_frame,
             from_=0,
             to=255,
             orient="horizontal",
@@ -137,6 +176,20 @@ class TrackerApp:
         self.current_roi_name = None
         self.last_roi_meta = None  # {name, hist, base_size:(w,h), base_frame:(W,H)}
         self.detect_threshold = 40  # backprojection confidence threshold (0-255)
+
+    def update_gui_size(self, value):
+        """Update the main GUI size based on scale"""
+        scale = int(value) / 100.0
+        # Update font sizes and window geometry
+        self.root.geometry(f"{int(400 * scale)}x{int(500 * scale)}")
+
+    def get_opencv_scale(self):
+        """Get the OpenCV window scale factor"""
+        return self.opencv_scale_var.get() / 100.0
+
+    def get_image_scale(self):
+        """Get the image detection scale factor"""
+        return self.image_scale_var.get() / 100.0
 
     def compute_initial_window(self, frame, roi_hist, roi_size, base_frame_size=None):
         base_w, base_h = roi_size
@@ -241,6 +294,9 @@ class TrackerApp:
         term_crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 1)
 
         cv2.namedWindow("Tracking", cv2.WINDOW_NORMAL)
+        # Set initial window size based on scale
+        scale = self.get_opencv_scale()
+        cv2.resizeWindow("Tracking", int(640 * scale), int(480 * scale))
         start_time = time.time()
         frames = 0
         while not self.stop_event.is_set():
@@ -410,6 +466,10 @@ class TrackerApp:
             cv2.putText(img, roi_name, (x, max(0, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             self.db.save_roi(roi_name, os.path.basename(target_path), x, y, w0, h0)
             self.db.log(os.path.basename(target_path), roi_name, time.time(), x, y, w0, h0, 0.0)
+            cv2.namedWindow("Image Detection", cv2.WINDOW_NORMAL)
+            # Set window size based on scale
+            scale = self.get_image_scale()
+            cv2.resizeWindow("Image Detection", int(img.shape[1] * scale), int(img.shape[0] * scale))
             cv2.imshow("Image Detection", img)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
@@ -475,6 +535,10 @@ class TrackerApp:
                 cv2.putText(img, roi_name, (x, max(0, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 self.db.save_roi(roi_name, os.path.basename(img_path), x, y, w0, h0)
                 self.db.log(os.path.basename(img_path), roi_name, time.time(), x, y, w0, h0, 0.0)
+                cv2.namedWindow("Image Detection", cv2.WINDOW_NORMAL)
+                # Set window size based on scale
+                scale = self.get_image_scale()
+                cv2.resizeWindow("Image Detection", int(img.shape[1] * scale), int(img.shape[0] * scale))
                 cv2.imshow("Image Detection", img)
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
@@ -537,6 +601,10 @@ class TrackerApp:
             cv2.putText(img, roi_name, (x, max(0, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             self.db.save_roi(roi_name, os.path.basename(target_path), x, y, w0, h0)
             self.db.log(os.path.basename(target_path), roi_name, time.time(), x, y, w0, h0, 0.0)
+            cv2.namedWindow("Image Detection", cv2.WINDOW_NORMAL)
+            # Set window size based on scale
+            scale = self.get_image_scale()
+            cv2.resizeWindow("Image Detection", int(img.shape[1] * scale), int(img.shape[0] * scale))
             cv2.imshow("Image Detection", img)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
@@ -598,6 +666,10 @@ class TrackerApp:
             cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(img, roi_name, (x, max(0, y - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             self.db.log(os.path.basename(path), roi_name, time.time(), x, y, w, h, 0.0)
+            cv2.namedWindow("Image Detection", cv2.WINDOW_NORMAL)
+            # Set window size based on scale
+            scale = self.get_image_scale()
+            cv2.resizeWindow("Image Detection", int(img.shape[1] * scale), int(img.shape[0] * scale))
             cv2.imshow("Image Detection", img)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
@@ -610,6 +682,10 @@ class TrackerApp:
             cv2.rectangle(img, (ix, iy), (ix + iw, iy + ih), (0, 255, 0), 2)
             cv2.putText(img, roi_name, (ix, max(0, iy - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             self.db.log(os.path.basename(path), roi_name, time.time(), ix, iy, iw, ih, 0.0)
+            cv2.namedWindow("Image Detection", cv2.WINDOW_NORMAL)
+            # Set window size based on scale
+            scale = self.get_image_scale()
+            cv2.resizeWindow("Image Detection", int(img.shape[1] * scale), int(img.shape[0] * scale))
             cv2.imshow("Image Detection", img)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
@@ -661,6 +737,10 @@ class TrackerApp:
             cv2.putText(img2, roi_name, (ix, max(0, iy - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             self.db.save_roi(roi_name, os.path.basename(target_path), ix, iy, iw, ih)
             self.db.log(os.path.basename(target_path), roi_name, time.time(), ix, iy, iw, ih, 0.0)
+            cv2.namedWindow("Image Detection", cv2.WINDOW_NORMAL)
+            # Set window size based on scale
+            scale = self.get_image_scale()
+            cv2.resizeWindow("Image Detection", int(img2.shape[1] * scale), int(img2.shape[0] * scale))
             cv2.imshow("Image Detection", img2)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
